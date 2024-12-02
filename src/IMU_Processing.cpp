@@ -1,4 +1,5 @@
 #include"IMU_Processing.h"
+#include <iomanip> // 包含 std::setprecision 和 std::fixed
 
 const bool time_list(PointType &x, PointType &y)
 {
@@ -619,6 +620,8 @@ void ImuProcess::UndistortPcl(LidarMeasureGroup &lidar_meas, StatesGroup &state_
   const double &imu_beg_time = v_imu.front()->header.stamp.toSec();
   const double &imu_end_time = v_imu.back()->header.stamp.toSec();
   const double pcl_beg_time = MAX(lidar_meas.lidar_beg_time, lidar_meas.last_update_time);
+  cout<<"UndistortPcl [ IMU Process ]: lidar_meas.lidar_beg_time： "<<lidar_meas.lidar_beg_time<< \
+  " lidar_meas.last_update_time: "<<lidar_meas.last_update_time<<endl;
   // const double &pcl_beg_time = meas.lidar_beg_time;
   
   /*** sort point clouds by offset time ***/
@@ -628,10 +631,13 @@ void ImuProcess::UndistortPcl(LidarMeasureGroup &lidar_meas, StatesGroup &state_
   const double pcl_end_time = lidar_meas.is_lidar_end? 
                                         lidar_meas.lidar_beg_time + lidar_meas.lidar->points.back().curvature / double(1000):
                                         lidar_meas.lidar_beg_time + lidar_meas.measures.back().img_offset_time;
+  cout<<"UndistortPcl [ IMU Process ]: +curvature_time： "<<lidar_meas.lidar_beg_time + lidar_meas.lidar->points.back().curvature / double(1000) \
+  <<" +img_offset_time: "<<lidar_meas.lidar_beg_time + lidar_meas.measures.back().img_offset_time<<endl;
+
   const double pcl_offset_time = lidar_meas.is_lidar_end? 
                                         (pcl_end_time - lidar_meas.lidar_beg_time) * double(1000):
                                         0.0;
-  while (pcl_it != pcl_it_end && pcl_it->curvature <= pcl_offset_time)
+  while (pcl_it != pcl_it_end && pcl_it->curvature <= pcl_offset_time)  // yhl: get all points from lidar_scan_begin to (lidar_scan_end or img_header_time)
   {
     pcl_out.push_back(*pcl_it);
     pcl_it++;
@@ -642,13 +648,14 @@ void ImuProcess::UndistortPcl(LidarMeasureGroup &lidar_meas, StatesGroup &state_
   lidar_meas.last_update_time = pcl_end_time;
   if (lidar_meas.is_lidar_end)
   {
-    lidar_meas.lidar_scan_index_now = 0;
+    lidar_meas.lidar_scan_index_now = 0;  // yhl: confused, if img_buffer.front() < lidar_end_time, even < lidar_beg_time, how to process in next scan? 
   }
   // sort(pcl_out.points.begin(), pcl_out.points.end(), time_list);
   // lidar_meas.debug_show();
-  // cout<<"UndistortPcl [ IMU Process ]: Process lidar from "<<pcl_beg_time<<" to "<<pcl_end_time<<", " \
-  //          <<meas.imu.size()<<" imu msgs from "<<imu_beg_time<<" to "<<imu_end_time<<endl;
-  // cout<<"v_imu.size: "<<v_imu.size()<<endl;
+  std::cout << std::fixed << std::setprecision(6); // 设置固定小数格式，保留6位小数
+  cout<<"UndistortPcl [ IMU Process ]: Process lidar from "<<pcl_beg_time<<" to "<<pcl_end_time<<", " \
+           <<meas.imu.size()<<" imu msgs from "<<imu_beg_time<<" to "<<imu_end_time<<endl;
+  cout<<"v_imu.size: "<<v_imu.size()<<endl;
   /*** Initialize IMU pose ***/
   IMUpose.clear();
   // IMUpose.push_back(set_pose6d(0.0, Zero3d, Zero3d, state.vel_end, state.pos_end, state.rot_end));
@@ -757,7 +764,7 @@ void ImuProcess::UndistortPcl(LidarMeasureGroup &lidar_meas, StatesGroup &state_
   last_imu_ = v_imu.back();
   last_lidar_end_time_ = pcl_end_time;
 
-  M3D extR_Ri(Lid_rot_to_IMU.transpose() * state_inout.rot_end.transpose());
+  M3D extR_Ri(Lid_rot_to_IMU.transpose() * state_inout.rot_end.transpose());  // yhl: confused, what are they?
   V3D exrR_extT(Lid_rot_to_IMU.transpose() * Lid_offset_to_IMU);
   
   // cout<<"[ IMU Process ]: vel "<<state_inout.vel_end.transpose()<<" pos "<<state_inout.pos_end.transpose()<<" ba"<<state_inout.bias_a.transpose()<<" bg "<<state_inout.bias_g.transpose()<<endl;

@@ -1001,7 +1001,7 @@ void LidarSelector::display_keypatch(double time)
     cv::Point2f origin;
     origin.x = 20;
     origin.y = 20;
-    cv::putText(img_cp, text, origin, cv::FONT_HERSHEY_COMPLEX, 0.6, cv::Scalar(255, 255, 255), 1, 8, 0);
+    cv::putText(img_cp, text, origin, cv::FONT_HERSHEY_COMPLEX, 3, cv::Scalar(255, 255, 255), 3, 8, 20);
 }
 
 V3F LidarSelector::getpixel(cv::Mat img, V2D pc) 
@@ -1028,7 +1028,7 @@ void LidarSelector::detect(cv::Mat img, PointCloudXYZI::Ptr pg)
 {
     if(width!=img.cols || height!=img.rows)
     {
-        // std::cout<<"Resize the img scale !!!"<<std::endl;
+        std::cout<<"Resize the img scale !!!"<<std::endl;
         double scale = 0.5;
         cv::resize(img,img,cv::Size(img.cols*scale,img.rows*scale),0,0,CV_INTER_LINEAR);
     }

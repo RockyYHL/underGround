@@ -48,6 +48,7 @@
 #include "IMU_Processing.h"
 #include <nav_msgs/Odometry.h>
 #include <nav_msgs/Path.h>
+#include <sensor_msgs/CompressedImage.h>
 #include <visualization_msgs/Marker.h>
 #include <pcl_conversions/pcl_conversions.h>
 #include <pcl/point_cloud.h>
@@ -421,6 +422,8 @@ void lasermap_fov_segment()
 }
 #endif
 
+# define YHL_MAX_BUFFER_SIZE 60
+
 void standard_pcl_cbk(const sensor_msgs::PointCloud2::ConstPtr &msg) 
 {
     mtx_buffer.lock();
@@ -440,6 +443,12 @@ void standard_pcl_cbk(const sensor_msgs::PointCloud2::ConstPtr &msg)
     // last_timestamp_lidar = msg->header.stamp.toSec() - 0.1;
     time_buffer.push_back(msg->header.stamp.toSec());
     last_timestamp_lidar = msg->header.stamp.toSec();
+    while (lidar_buffer.size() > YHL_MAX_BUFFER_SIZE) {
+        lidar_buffer.pop_front(); // 删除最前面的元素
+    }
+    while (time_buffer.size() > YHL_MAX_BUFFER_SIZE) {
+        time_buffer.pop_front(); // 删除最前面的元素
+    }
     mtx_buffer.unlock();
     sig_buffer.notify_all();
 }
@@ -493,14 +502,39 @@ cv::Mat getImageFromMsg(const sensor_msgs::ImageConstPtr& img_msg) {
   return img;
 }
 
-void img_cbk(const sensor_msgs::ImageConstPtr& msg)
+// void img_cbk(const sensor_msgs::ImageConstPtr& msg)
+// {
+//     if (!img_en) 
+//     {
+//         return;
+//     }
+//     double msg_header_time = msg->header.stamp.toSec() + delta_time;
+//     printf("[ INFO ]: get img at time: %.6f.\n", msg_header_time);
+//     if (msg_header_time < last_timestamp_img)
+//     {
+//         ROS_ERROR("img loop back, clear buffer");
+//         img_buffer.clear();
+//         img_time_buffer.clear();
+//     }
+//     mtx_buffer.lock();
+
+//     img_buffer.push_back(getImageFromMsg(msg));
+//     img_time_buffer.push_back(msg_header_time);
+//     last_timestamp_img = msg_header_time;
+
+//     mtx_buffer.unlock();
+//     sig_buffer.notify_all();
+// }
+
+
+void img_cbk(const sensor_msgs::CompressedImageConstPtr& msg)
 {
     if (!img_en) 
     {
         return;
     }
     double msg_header_time = msg->header.stamp.toSec() + delta_time;
-    printf("[ INFO ]: get img at time: %.6f.\n", msg_header_time);
+    printf("[ INFO ]: get compressed img at time: %.6f.\n", msg_header_time);
     if (msg_header_time < last_timestamp_img)
     {
         ROS_ERROR("img loop back, clear buffer");
@@ -509,9 +543,19 @@ void img_cbk(const sensor_msgs::ImageConstPtr& msg)
     }
     mtx_buffer.lock();
 
-    img_buffer.push_back(getImageFromMsg(msg));
+    // 解压缩图像数据
+    std::vector<uchar> data(msg->data.begin(), msg->data.end());
+    cv::Mat img = cv::imdecode(data, cv::IMREAD_COLOR); // 使用 OpenCV 解码
+    img_buffer.push_back(img);
     img_time_buffer.push_back(msg_header_time);
     last_timestamp_img = msg_header_time;
+
+    while (img_buffer.size() > YHL_MAX_BUFFER_SIZE) {
+        img_buffer.pop_front(); // 删除最前面的元素
+    }
+    while (img_time_buffer.size() > YHL_MAX_BUFFER_SIZE) {
+        img_time_buffer.pop_front(); // 删除最前面的元素
+    }
 
     mtx_buffer.unlock();
     sig_buffer.notify_all();
@@ -550,7 +594,7 @@ bool sync_packages(LidarMeasureGroup &meas)
         }
         sort(meas.lidar->points.begin(), meas.lidar->points.end(), time_list); // sort by sample timestamp
         meas.lidar_beg_time = time_buffer.front(); // generate lidar_beg_time
-        lidar_end_time = meas.lidar_beg_time + meas.lidar->points.back().curvature / double(1000); // calc lidar scan end time
+        lidar_end_time = meas.lidar_beg_time + meas.lidar->points.back().curvature / double(1000); // yhl: calc lidar scan end time: msg header time + scan end offset time
         lidar_pushed = true; // flag
     }
 
@@ -565,7 +609,7 @@ bool sync_packages(LidarMeasureGroup &meas)
         mtx_buffer.lock();
         while ((!imu_buffer.empty() && (imu_time<lidar_end_time))) {
             imu_time = imu_buffer.front()->header.stamp.toSec();
-            if(imu_time > lidar_end_time) break;
+            if(imu_time > lidar_end_time) break;    // yhl: imu msgs time <= lidar_end_time
             m.imu.push_back(imu_buffer.front());
             imu_buffer.pop_front();
         }
@@ -580,8 +624,8 @@ bool sync_packages(LidarMeasureGroup &meas)
         return true;
     }
     struct MeasureGroup m;
-    // cout<<"lidar_buffer.size(): "<<lidar_buffer.size()<<" img_buffer.size(): "<<img_buffer.size()<<endl;
-    // cout<<"time_buffer.size(): "<<time_buffer.size()<<" img_time_buffer.size(): "<<img_time_buffer.size()<<endl;
+    cout<<"lidar_buffer.size(): "<<lidar_buffer.size()<<" img_buffer.size(): "<<img_buffer.size()<<endl;
+    cout<<"time_buffer.size(): "<<time_buffer.size()<<" img_time_buffer.size(): "<<img_time_buffer.size()<<endl;
     // cout<<"img_time_buffer.front(): "<<img_time_buffer.front()<<"lidar_end_time: "<<lidar_end_time<<"last_timestamp_imu: "<<last_timestamp_imu<<endl;
     if ((img_time_buffer.front()>lidar_end_time) )
     { // has img topic, but img topic timestamp larger than lidar end time, process lidar topic.
@@ -618,7 +662,7 @@ bool sync_packages(LidarMeasureGroup &meas)
         }
         double imu_time = imu_buffer.front()->header.stamp.toSec();
         m.imu.clear();
-        m.img_offset_time = img_start_time - meas.lidar_beg_time; // record img offset time, it shoule be the Kalman update timestamp.
+        m.img_offset_time = img_start_time - meas.lidar_beg_time; // yhl: this offset time is : imageMsg_header_time - lidarMsg_header_time, record img offset time, it shoule be the Kalman update timestamp.
         m.img = img_buffer.front();
         mtx_buffer.lock();
         while ((!imu_buffer.empty() && (imu_time<img_start_time))) 
