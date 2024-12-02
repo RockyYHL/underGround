@@ -1,3 +1,5 @@
 PCD/
+Log/
 *.pcd
 *.log
+*.rviz
